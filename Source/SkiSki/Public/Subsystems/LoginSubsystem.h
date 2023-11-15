@@ -72,7 +72,7 @@ protected:
 
 // Do not use this Funcs
 public:
-	bool Recv(FSocket* LoginSocket, FLoginPacketData& OutRecvPacket);
+	static bool Recv(TSharedPtr<FSocket> LoginSocket, FLoginPacketData& OutRecvPacket);
 
 	void DestroySocket(FSocket*& TargetSocket);
 
@@ -93,7 +93,7 @@ public:
 
 protected:
 	// For Socket Error Log
-	void PrintSocketError(const FString& Text);
+	void PrintSocketError();
 
 protected:
 // You Can Write Your Custom Codes In this Func
@@ -115,7 +115,7 @@ protected:
 /*-----------------------------------------------------*/
 
 protected:
-	class FRecvThread* RecvThread;
+	//class FRecvThread* RecvThread;
 
 	FLoginPacketData RecvPacketData;
 
@@ -125,7 +125,7 @@ protected:
 class SKISKI_API FRecvThread : public FRunnable
 {
 public:
-	FRecvThread(class ULoginSubsystem* NewLoginSubsystem, FSocket* LoginSocket);
+	FRecvThread(TSharedPtr<FSocket> LoginSocket);
 	virtual ~FRecvThread();
 
 protected:
@@ -137,7 +137,6 @@ private:
 	FRunnableThread* Thread;
 
 private:
-	class ULoginSubsystem* LoginSubsystem;
-	FSocket* Socket;
+	TSharedPtr<FSocket> Socket;
 
 };

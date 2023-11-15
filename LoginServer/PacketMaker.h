@@ -18,12 +18,6 @@ public:
 
 	static bool SendPacket(SOCKET* ClientSocket, EPacket PacketToSend, const char* MessageToSend);
 
-	//// broadcasting. doesnt need ACK
-	//static void SendPacketToAllConnectedClients(const map<unsigned short, UserData>& UserList, EPacket PacketToSend, const char* MessageToSend);
-
-	//// broadcasting. doesnt need ACK. Param : Excep User NickName
-	//static void SendPacketToAllConnectedClients(const map<unsigned short, UserData>& UserList, EPacket PacketToSend, const char* MessageToSend, unsigned short ExcepUserNumber);
-
 protected:
 	// Use this PacketMaker if does not have params
 	static pair<char*, int> MakeBuffer(EPacket Type);

@@ -10,7 +10,7 @@
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "IPAddress.h"
-//#include "terse/utils/Endianness.h"
+#include "terse/utils/Endianness.h"
 
 ULoginSubsystem::ULoginSubsystem()
 {
@@ -18,13 +18,15 @@ ULoginSubsystem::ULoginSubsystem()
 
 FSocket* ULoginSubsystem::Connect(const int32& PortNum, const FString& IP)
 {
+	// Create
 	FSocket* LoginSocket = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateSocket(NAME_Stream, TEXT("LoginSocket"), false);
 	if (!LoginSocket)
 	{
 		ABLOG(Error, TEXT("Create Socket Failure"));
-		return false;
+		return nullptr;
 	}
 
+	// Bind
 	FIPv4Address IPv4Address;
 	FIPv4Address::Parse(IP, IPv4Address);
 
@@ -32,21 +34,19 @@ FSocket* ULoginSubsystem::Connect(const int32& PortNum, const FString& IP)
 	SocketAddress->SetPort(PortNum);
 	SocketAddress->SetIp(IPv4Address.Value);
 
-	if (LoginSocket->Connect(*SocketAddress))
-	{
-		ABLOG(Warning, TEXT("Connect Server Success!"));
-
-		return LoginSocket;
-	}
-	else
+	// Connect
+	if (!LoginSocket->Connect(*SocketAddress))
 	{
 		ABLOG(Error, TEXT("Connect Server Fail"));
-		PrintSocketError(TEXT("Connect"));
+		PrintSocketError();
 
 		DestroySocket(LoginSocket);
+
+		return nullptr;
 	}
 
-	return nullptr;
+	ABLOG(Warning, TEXT("Connect Server Success!"));
+	return LoginSocket;
 }
 
 void ULoginSubsystem::DestroySocket(FSocket*& TargetSocket)
@@ -64,12 +64,12 @@ void ULoginSubsystem::DestroySocket(FSocket*& TargetSocket)
 	}
 }
 
-void ULoginSubsystem::PrintSocketError(const FString& Text)
+void ULoginSubsystem::PrintSocketError()
 {
 	ESocketErrors SocketErrorCode = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
 	const TCHAR* SocketError = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetSocketError(SocketErrorCode);
 
-	UE_LOG(LogSockets, Error, TEXT("[%s]  SocketError : %s"), *Text, SocketError);
+	UE_LOG(LogSockets, Error, TEXT("Socket Error : %s (%d)"), SocketError, (int32)SocketErrorCode);
 }
 
 void ULoginSubsystem::ManageRecvPacket()
@@ -119,7 +119,7 @@ void ULoginSubsystem::ManageRecvPacket()
 	GetWorld()->GetTimerManager().ClearTimer(ManageRecvPacketHandle);
 }
 
-bool ULoginSubsystem::Recv(FSocket* LoginSocket, FLoginPacketData& OutRecvPacket)
+bool ULoginSubsystem::Recv(TSharedPtr<FSocket> LoginSocket, FLoginPacketData& OutRecvPacket)
 {
 	if (!LoginSocket)
 	{
@@ -133,11 +133,11 @@ bool ULoginSubsystem::Recv(FSocket* LoginSocket, FLoginPacketData& OutRecvPacket
 		HeaderBuffer.AddZeroed(HeaderSize);
 
 		// Recv Header
-		int BytesRead = 0;
-		bool bRecvHeader = LoginSocket->Recv(HeaderBuffer.GetData(), HeaderSize, BytesRead);
+		int32 BytesRead = 0;
+		bool bRecvHeader = LoginSocket->Recv(HeaderBuffer.GetData(), HeaderSize, BytesRead, ESocketReceiveFlags::WaitAll);
 		if (!bRecvHeader)
 		{
-			PrintSocketError(TEXT("Receive Header"));
+			//PrintSocketError(TEXT("Receive Header"));
 			return false;
 		}
 
@@ -149,8 +149,8 @@ bool ULoginSubsystem::Recv(FSocket* LoginSocket, FLoginPacketData& OutRecvPacket
 		FMemory::Memcpy(&RecvPacketType, HeaderBuffer.GetData() + sizeof(uint16_t), sizeof(uint16_t));
 
 		/* I Skip Network Byte Ordering because most of game devices use little endian */
-		//RecvPayloadSize = ntoh(RecvPayloadSize);
-		//RecvPacketType = ntoh(RecvPacketType);
+		RecvPayloadSize = ntoh(RecvPayloadSize);
+		RecvPacketType = ntoh(RecvPacketType);
 
 		OutRecvPacket.PacketType = static_cast<ELoginPacket>(RecvPacketType);
 
@@ -160,11 +160,11 @@ bool ULoginSubsystem::Recv(FSocket* LoginSocket, FLoginPacketData& OutRecvPacket
 			uint8_t* PayloadBuffer = new uint8_t[RecvPayloadSize + 1];
 
 			BytesRead = 0;
-			bool bRecvPayload = LoginSocket->Recv(PayloadBuffer, RecvPayloadSize, BytesRead);
+			bool bRecvPayload = LoginSocket->Recv(PayloadBuffer, RecvPayloadSize, BytesRead, ESocketReceiveFlags::WaitAll);
 
 			if (!bRecvPayload)
 			{
-				PrintSocketError(TEXT("Receive Payload"));
+				//PrintSocketError(TEXT("Receive Payload"));
 				return false;
 			}
 			PayloadBuffer[RecvPayloadSize] = '\0';
@@ -186,16 +186,15 @@ bool ULoginSubsystem::Recv(FSocket* LoginSocket, FLoginPacketData& OutRecvPacket
 
 bool ULoginSubsystem::Send(const FLoginPacketData& SendPacket)
 {
-	FSocket* LoginSocket = Connect(ServerPort, ServerIP);
+	// Connect to Server And Send Packet, Start Recv Thread
 
+	TSharedPtr<FSocket> LoginSocket = MakeShareable<FSocket>(Connect(ServerPort, ServerIP));
 	if (!LoginSocket)
 	{
-		if (RecvPacketDelegate.IsBound())
-		{
-			RecvPacketDelegate.Broadcast(TEXT("로그인 서버 접속 실패"), 0, false);
-		}
 		return false;
 	}
+
+	ABLOG(Warning, TEXT("LoginSocket count : %d"), LoginSocket.GetSharedReferenceCount());
 
 	uint8_t* PayloadBuffer = nullptr;
 	uint16_t PayloadSize = 0;
@@ -220,34 +219,33 @@ bool ULoginSubsystem::Send(const FLoginPacketData& SendPacket)
 	FMemory::Memcpy(&HeaderBuffer[2], &Type, 2);
 
 	int32 BytesSent = 0;
-	bool bSendBuffer = LoginSocket->Send(HeaderBuffer, HeaderSize, BytesSent);
-	if (!bSendBuffer)
+	if (!LoginSocket->Send(HeaderBuffer, HeaderSize, BytesSent))
 	{
-		PrintSocketError(TEXT("Send"));
+		ABLOG(Error, TEXT("Send Error"));
+		PrintSocketError();
 		return false;
 	}
 
 	if (PayloadBuffer != nullptr)
 	{
 		BytesSent = 0;
-		bSendBuffer = LoginSocket->Send(PayloadBuffer, PayloadSize, BytesSent);
-		if (!bSendBuffer)
+		if (!LoginSocket->Send(PayloadBuffer, PayloadSize, BytesSent))
 		{
-			PrintSocketError(TEXT("Send"));
+			ABLOG(Error, TEXT("Send Error"));
+			PrintSocketError();
 			return false;
 		}
 	}
 
 	// Start Recv Thread
-	RecvThread = new FRecvThread(this, LoginSocket);
+	FRecvThread* RecvThread = new FRecvThread(LoginSocket);
 
-	GetWorld()->GetTimerManager().SetTimer(ManageRecvPacketHandle, this, &ULoginSubsystem::ManageRecvPacket, 0.1f, true);
+	//GetWorld()->GetTimerManager().SetTimer(ManageRecvPacketHandle, this, &ULoginSubsystem::ManageRecvPacket, 0.1f, true);
 
 	return true;
 }
 
-FRecvThread::FRecvThread(ULoginSubsystem* NewLoginSubsystem, FSocket* LoginSocket)
-	: LoginSubsystem(NewLoginSubsystem), Socket(LoginSocket)
+FRecvThread::FRecvThread(TSharedPtr<FSocket> LoginSocket) : Socket(LoginSocket)
 {
 	Thread = FRunnableThread::Create(this, TEXT("RecvThread"));
 }
@@ -266,7 +264,7 @@ uint32 FRecvThread::Run()
 	while (true)
 	{
 		FLoginPacketData PacketData;
-		bool RecvByte = LoginSubsystem->Recv(Socket, PacketData);
+		bool RecvByte = ULoginSubsystem::Recv(Socket, PacketData);
 		if (!RecvByte)
 		{
 			ABLOG(Error, TEXT("Recv Error, Stop Thread"));
@@ -275,7 +273,8 @@ uint32 FRecvThread::Run()
 
 		if (PacketData.PacketType != ELoginPacket::None)
 		{
-			LoginSubsystem->SetRecvPacket(PacketData);
+			//LoginSubsystem->SetRecvPacket(PacketData);
+			ABLOG(Warning, TEXT("Recv Success!"));
 			break;
 		}
 	}
@@ -285,8 +284,5 @@ uint32 FRecvThread::Run()
 
 void FRecvThread::Exit()
 {
-	LoginSubsystem->DestroySocket(Socket);
-	delete Socket;
-	LoginSubsystem = nullptr;
-	delete LoginSubsystem;
+	ABLOG(Warning, TEXT("FRecvThread::Exit"));
 }

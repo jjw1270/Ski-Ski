@@ -120,6 +120,12 @@ void ProcessPacket(SOCKET& ClientSocket, const pair<EPacket, char*>& PacketData)
 
 	switch (PacketData.first)
 	{
+	case EPacket::C2S_Ping:
+	{
+		cout << "Ping Recv" << endl;
+		PacketMaker::SendPacket(&ClientSocket, EPacket::S2C_Ping);
+	}
+	break;
 	case EPacket::C2S_ReqSignIn:
 	{
 		char* ColonPtr = strchr(PacketData.second, ':');
@@ -303,7 +309,7 @@ int main()
 		exit(-1);
 	}
 
-	Sql_Connection->setSchema("skiski");
+	Sql_Connection->setSchema("SkiSki");
 
 	cout << "Starting Login Server... ";
 

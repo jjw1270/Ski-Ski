@@ -4,21 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
-#include "TitleGameMode.generated.h"
+#include "MainLobbyGameMode.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class SKISKI_API ATitleGameMode : public AGameModeBase
+class SKISKI_API AMainLobbyGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 	
-protected:
-	virtual void StartPlay() override;
-
-protected:
-	UPROPERTY()
-	class ULoginSubsystem* LoginSubSystem;
-
 };
